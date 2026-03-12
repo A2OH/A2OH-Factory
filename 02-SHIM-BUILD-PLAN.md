@@ -209,19 +209,22 @@ flowchart TD
 
 **Create `test-harness/run-all.sh`:**
 
-```
-+---------------------------------------------+
-|  run-all.sh                                 |
-|                                             |
-|  1. Compile shim Java classes (javac)       |
-|  2. Run Android-side headless tests (JVM)   |
-|  3. Build OHOS native test binary (CMake)   |
-|  4. Run OHOS-side tests (native x86)        |
-|  5. [Optional] Build qemu-arm-linux-min     |
-|  6. [Optional] Boot QEMU, run on-device     |
-|  7. Merge results -> JSON report            |
-|  8. Update shim_progress.db                 |
-+---------------------------------------------+
+```mermaid
+flowchart TD
+    A["1. Compile shim Java classes (javac)"] --> B["2. Run Android-side headless tests (JVM)"]
+    B --> C["3. Build OHOS native test binary (CMake)"]
+    C --> D["4. Run OHOS-side tests (native x86)"]
+    D --> E{"--level 3?"}
+    E -->|Yes| F["5. Build qemu-arm-linux-min"]
+    F --> G["6. Boot QEMU, run on-device"]
+    E -->|No| H["7. Merge results → JSON report"]
+    G --> H
+    H --> I["8. Update shim_progress.db"]
+
+    style A fill:#1e3a5f,stroke:#3b82f6,color:#e5e7eb
+    style D fill:#1e3a5f,stroke:#3b82f6,color:#e5e7eb
+    style G fill:#92400e,stroke:#f59e0b,color:#e5e7eb
+    style I fill:#065f46,stroke:#10b981,color:#e5e7eb
 ```
 
 **Levels of testing (selectable via `--level` flag):**
@@ -363,34 +366,32 @@ You are generating an Android API shim class for OpenHarmony.
 
 **Enhance the existing 416-line script with error-feedback loops:**
 
-```
-+--------------------------------------------------+
-|                AI GENERATION LOOP                |
-|                                                  |
-|  FOR each class in priority queue:               |
-|                                                  |
-|    1. QUERY api_compat.db for all APIs + guides  |
-|    2. QUERY existing shim code (if updating)     |
-|    3. BUILD prompt from template                 |
-|    4. CALL Claude API -> get Java + test + bridge|
-|    5. WRITE files to shim/ and test-apps/        |
-|    6. COMPILE (javac for Java, cmake for OHOS)   |
-|       +-- SUCCESS -> go to step 7               |
-|       +-- FAILURE -> feed errors back to AI     |
-|          +-- RETRY (max 3 iterations)           |
-|    7. RUN Android-side tests                     |
-|       +-- PASS -> go to step 8                  |
-|       +-- FAIL -> feed failures back to AI      |
-|          +-- RETRY (max 3 iterations)           |
-|    8. RUN OHOS-side tests (headless)             |
-|       +-- PASS -> go to step 9                  |
-|       +-- FAIL -> feed failures back to AI      |
-|          +-- RETRY (max 3 iterations)           |
-|    9. UPDATE shim_progress.db                    |
-|   10. GIT COMMIT (if all pass)                   |
-|                                                  |
-|  REPORT: classes attempted, passed, failed       |
-+--------------------------------------------------+
+```mermaid
+flowchart TD
+    Q["FOR each class in priority queue"] --> S1["1. QUERY api_compat.db<br/>all APIs + guides"]
+    S1 --> S2["2. QUERY existing shim code"]
+    S2 --> S3["3. BUILD prompt from template"]
+    S3 --> S4["4. CALL Claude API<br/>→ Java + test + bridge"]
+    S4 --> S5["5. WRITE files to shim/ and test-apps/"]
+    S5 --> S6["6. COMPILE<br/>javac + cmake"]
+    S6 --> C1{Success?}
+    C1 -->|No| F1["Feed errors to AI"] --> S4
+    C1 -->|Yes| S7["7. RUN Android-side tests"]
+    S7 --> C2{Pass?}
+    C2 -->|No| F2["Feed failures to AI"] --> S4
+    C2 -->|Yes| S8["8. RUN OHOS-side tests (headless)"]
+    S8 --> C3{Pass?}
+    C3 -->|No| F3["Feed failures to AI"] --> S4
+    C3 -->|Yes| S9["9. UPDATE shim_progress.db"]
+    S9 --> S10["10. GIT COMMIT"]
+    S10 --> REPORT["REPORT: attempted, passed, failed"]
+
+    style Q fill:#1e3a5f,stroke:#3b82f6,color:#e5e7eb
+    style S4 fill:#6d28d9,stroke:#7c3aed,color:#e5e7eb
+    style S10 fill:#065f46,stroke:#10b981,color:#e5e7eb
+    style F1 fill:#7f1d1d,stroke:#ef4444,color:#e5e7eb
+    style F2 fill:#7f1d1d,stroke:#ef4444,color:#e5e7eb
+    style F3 fill:#7f1d1d,stroke:#ef4444,color:#e5e7eb
 ```
 
 **Key improvement over existing `a2oh-loop.sh`:** The error-feedback loop. When compilation or tests fail, the error output is appended to the prompt and the AI regenerates. This self-healing loop is where AI coding adds the most value — the AI sees its own mistakes and corrects them, typically converging within 2-3 iterations.
@@ -865,21 +866,25 @@ test-harness/
 
 ### 5.2 — CI Loop (Nightly)
 
-```
-+-----------------------------------------------------+
-|  NIGHTLY CI                                         |
-|                                                     |
-|  1. Pull latest api_compat.db updates               |
-|  2. Run AI generation for next N unshimmed classes   |
-|  3. Compile all shim code (Android + OHOS)          |
-|  4. Run Level 1 tests (mock, ~30 sec)               |
-|  5. Run Level 2 tests (headless ArkUI, ~2 min)      |
-|  6. Run Level 3 tests (QEMU, ~10 min)               |
-|  7. Update shim_progress.db                         |
-|  8. Generate coverage report                        |
-|  9. Commit passing shims                            |
-| 10. File issues for failures needing human review   |
-+-----------------------------------------------------+
+```mermaid
+flowchart TD
+    N1["1. Pull latest api_compat.db"] --> N2["2. AI generation for<br/>next N unshimmed classes"]
+    N2 --> N3["3. Compile all shim code<br/>Android + OHOS"]
+    N3 --> N4["4. Level 1 tests<br/>mock ~30s"]
+    N4 --> N5["5. Level 2 tests<br/>headless ArkUI ~2min"]
+    N5 --> N6["6. Level 3 tests<br/>QEMU ~10min"]
+    N6 --> N7["7. Update shim_progress.db"]
+    N7 --> N8["8. Generate coverage report"]
+    N8 --> N9["9. Commit passing shims"]
+    N9 --> N10["10. File issues for<br/>failures needing human review"]
+
+    style N1 fill:#1e3a5f,stroke:#3b82f6,color:#e5e7eb
+    style N2 fill:#6d28d9,stroke:#7c3aed,color:#e5e7eb
+    style N4 fill:#065f46,stroke:#10b981,color:#e5e7eb
+    style N5 fill:#065f46,stroke:#10b981,color:#e5e7eb
+    style N6 fill:#92400e,stroke:#f59e0b,color:#e5e7eb
+    style N9 fill:#065f46,stroke:#10b981,color:#e5e7eb
+    style N10 fill:#7f1d1d,stroke:#ef4444,color:#e5e7eb
 ```
 
 ### 5.3 — Coverage Tracking Dashboard

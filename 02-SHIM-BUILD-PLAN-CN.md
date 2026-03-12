@@ -189,19 +189,22 @@ flowchart TD
 
 **创建 `test-harness/run-all.sh`：**
 
-```
-+---------------------------------------------+
-|  run-all.sh                                 |
-|                                             |
-|  1. 编译适配 Java 类 (javac)                 |
-|  2. 运行 Android 端无头测试 (JVM)            |
-|  3. 构建 OHOS 原生测试二进制 (CMake)          |
-|  4. 运行 OHOS 端测试 (x86 原生)              |
-|  5. [可选] 构建 qemu-arm-linux-min           |
-|  6. [可选] 启动 QEMU，设备端运行              |
-|  7. 合并结果 -> JSON 报告                    |
-|  8. 更新 shim_progress.db                   |
-+---------------------------------------------+
+```mermaid
+flowchart TD
+    A["1. 编译适配 Java 类 (javac)"] --> B["2. 运行 Android 端无头测试 (JVM)"]
+    B --> C["3. 构建 OHOS 原生测试二进制 (CMake)"]
+    C --> D["4. 运行 OHOS 端测试 (x86 原生)"]
+    D --> E{"--level 3?"}
+    E -->|是| F["5. 构建 qemu-arm-linux-min"]
+    F --> G["6. 启动 QEMU，设备端运行"]
+    E -->|否| H["7. 合并结果 → JSON 报告"]
+    G --> H
+    H --> I["8. 更新 shim_progress.db"]
+
+    style A fill:#1e3a5f,stroke:#3b82f6,color:#e5e7eb
+    style D fill:#1e3a5f,stroke:#3b82f6,color:#e5e7eb
+    style G fill:#92400e,stroke:#f59e0b,color:#e5e7eb
+    style I fill:#065f46,stroke:#10b981,color:#e5e7eb
 ```
 
 **测试级别（通过 `--level` 选择）：**
@@ -342,35 +345,25 @@ ORDER BY api_count DESC, avg_score DESC;
 
 **增强现有 416 行脚本，加入错误反馈循环：**
 
-```
-+--------------------------------------------------+
-|               AI 生成循环流程                      |
-+--------------------------------------------------+
-|                                                  |
-|  对于优先级队列中的每个类：                         |
-|                                                  |
-|    1. 查询 api_compat.db 获取所有 API + 指南      |
-|    2. 查询已有适配代码（如更新）                    |
-|    3. 从模板构建提示词                             |
-|    4. 调用 Claude API -> 获取 Java + 测试 + 桥接  |
-|    5. 写入文件到 shim/ 和 test-apps/              |
-|    6. 编译 (javac 编译 Java, cmake 编译 OHOS)     |
-|       +-- 成功 -> 继续步骤 7                      |
-|       +-- 失败 -> 将错误反馈给 AI                  |
-|          +-- 重试（最多 3 次迭代）                 |
-|    7. 运行 Android 端测试                         |
-|       +-- 通过 -> 继续步骤 8                      |
-|       +-- 失败 -> 将失败信息反馈给 AI              |
-|          +-- 重试（最多 3 次迭代）                 |
-|    8. 运行 OHOS 端测试（无头模式）                  |
-|       +-- 通过 -> 继续步骤 9                      |
-|       +-- 失败 -> 将失败信息反馈给 AI              |
-|          +-- 重试（最多 3 次迭代）                 |
-|    9. 更新 shim_progress.db                      |
-|   10. GIT 提交（如全部通过）                       |
-|                                                  |
-|  报告：尝试数、通过数、失败数                       |
-+--------------------------------------------------+
+```mermaid
+flowchart TD
+    START["对于优先级队列中的每个类"] --> Q1["1. 查询 api_compat.db\n获取所有 API + 指南"]
+    Q1 --> Q2["2. 查询已有适配代码"]
+    Q2 --> Q3["3. 从模板构建提示词"]
+    Q3 --> Q4["4. 调用 Claude API\n→ Java + 测试 + 桥接"]
+    Q4 --> Q5["5. 写入文件到\nshim/ 和 test-apps/"]
+    Q5 --> COMPILE["6. 编译\njavac + cmake"]
+    COMPILE --> C_OK{编译成功?}
+    C_OK -- 是 --> ANDROID["7. 运行 Android 端测试"]
+    C_OK -- 否 --> C_FB["错误反馈给 AI\n重试 ≤3 次"] --> Q4
+    ANDROID --> A_OK{测试通过?}
+    A_OK -- 是 --> OHOS["8. 运行 OHOS 端测试\n无头模式"]
+    A_OK -- 否 --> A_FB["失败信息反馈给 AI\n重试 ≤3 次"] --> Q4
+    OHOS --> O_OK{测试通过?}
+    O_OK -- 是 --> UPD["9. 更新 shim_progress.db"]
+    O_OK -- 否 --> O_FB["失败信息反馈给 AI\n重试 ≤3 次"] --> Q4
+    UPD --> GIT["10. GIT 提交"]
+    GIT --> REPORT["报告：尝试数、通过数、失败数"]
 ```
 
 **相比现有 `a2oh-loop.sh` 的关键改进：** 错误反馈循环。当编译或测试失败时，错误输出附加到提示词中，AI 重新生成。这种自我修复循环是 AI 编码的核心价值 — AI 看到自己的错误并纠正，通常在 2-3 次迭代内收敛。
@@ -493,39 +486,14 @@ test-apps/07-tier2-media/
 
 **QEMU 测试运行流程：**
 
-```
-+--------------------------------------------------+
-|            QEMU 集成测试流程                       |
-+--------------------------------------------------+
-|                                                  |
-|  1. 构建 qemu-arm-linux-min（含测试二进制文件）     |
-|     |                                            |
-|     v                                            |
-|  2. 启动 QEMU                                    |
-|     - virtio-mmio 驱动顺序（反向枚举）：           |
-|       userdata, vendor, system, updater          |
-|     - vda=updater, vdb=system, vdc=vendor,       |
-|       vdd=userdata                               |
-|     |                                            |
-|     v                                            |
-|  3. 等待 init 达到多用户目标                       |
-|     - 超时时间：120 秒                             |
-|     |                                            |
-|     v                                            |
-|  4. 通过串口控制台执行测试                          |
-|     - 或通过 HDC 推送测试二进制文件                 |
-|     |                                            |
-|     v                                            |
-|  5. 捕获 stdout/stderr                           |
-|     - 解析 gtest XML 输出                         |
-|     |                                            |
-|     v                                            |
-|  6. 关闭 QEMU                                    |
-|     |                                            |
-|     v                                            |
-|  7. 合并结果到 shim_progress.db                   |
-|                                                  |
-+--------------------------------------------------+
+```mermaid
+flowchart TD
+    B["1. 构建 qemu-arm-linux-min\n含测试二进制文件"] --> Q["2. 启动 QEMU\nvirtio-mmio 反向枚举\nvda=updater vdb=system\nvdc=vendor vdd=userdata"]
+    Q --> W["3. 等待 init 达到多用户目标\n超时 120 秒"]
+    W --> T["4. 通过串口控制台执行测试\n或通过 HDC 推送二进制文件"]
+    T --> C["5. 捕获 stdout/stderr\n解析 gtest XML 输出"]
+    C --> S["6. 关闭 QEMU"]
+    S --> M["7. 合并结果到\nshim_progress.db"]
 ```
 
 **QEMU 环境约束（来自前期工作）：**
@@ -753,21 +721,17 @@ test-harness/
 
 ### 5.2 — CI 循环（每夜构建）
 
-```
-+-----------------------------------------------------+
-|  每夜 CI 流程                                        |
-|                                                     |
-|  1. 拉取最新 api_compat.db 更新                      |
-|  2. AI 生成下一批未适配的类                            |
-|  3. 编译所有适配代码（Android + OHOS）                 |
-|  4. 运行第1级测试（Mock，~30 秒）                     |
-|  5. 运行第2级测试（无头 ArkUI，~2 分钟）               |
-|  6. 运行第3级测试（QEMU，~10 分钟）                   |
-|  7. 更新 shim_progress.db                           |
-|  8. 生成覆盖率报告                                    |
-|  9. 提交通过的适配代码                                 |
-| 10. 为需要人工审查的失败项创建 Issue                    |
-+-----------------------------------------------------+
+```mermaid
+flowchart TD
+    S1["1. 拉取最新 api_compat.db 更新"] --> S2["2. AI 生成下一批未适配的类"]
+    S2 --> S3["3. 编译所有适配代码\nAndroid + OHOS"]
+    S3 --> S4["4. 运行第1级测试\nMock ~30 秒"]
+    S4 --> S5["5. 运行第2级测试\n无头 ArkUI ~2 分钟"]
+    S5 --> S6["6. 运行第3级测试\nQEMU ~10 分钟"]
+    S6 --> S7["7. 更新 shim_progress.db"]
+    S7 --> S8["8. 生成覆盖率报告"]
+    S8 --> S9["9. 提交通过的适配代码"]
+    S9 --> S10["10. 为失败项创建 Issue\n需要人工审查"]
 ```
 
 ### 5.3 — 覆盖率跟踪仪表盘
